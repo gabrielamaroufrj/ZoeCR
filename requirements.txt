@@ -1,0 +1,7 @@
+flet>=0.80.1
+pdfplumber
+pdfminer.six
+pillow
+cffi
+charset-normalizer
+numpy==1.26.4
