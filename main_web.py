@@ -1,11 +1,12 @@
 import flet as ft
-import json
 import os
 import pdfplumber
 import re
 import numpy as np
+import json
 from dataclasses import dataclass, field
 import os
+import asyncio
 
 if "FLET_SECRET_KEY" not in os.environ:
     os.environ["FLET_SECRET_KEY"] = "97eb96726f49b3a6facdbcc1e46d48dd"
@@ -17,7 +18,6 @@ class State:
     picked_files: list[ft.FilePickerFile] = field(default_factory=list)
 
 # Nome do arquivo onde os dados ficarão salvos
-ARQUIVO_DADOS = "dados_cr.json"
 MARCADOR_FIM = "Totais: no período"
 PADRAO_CODIGO = r"[A-Z]{3,4}\d{2,3}"
 PADRAO_SITUACAO = r"\b(AP|RM|RFM|RF)\b"
@@ -48,7 +48,7 @@ class Disciplina:
         self.peso = ft.TextField(
             label="Créditos",
             value=p_ini,
-            keyboard_type="number", # Usando string para compatibilidade
+            keyboard_type="number", 
             on_change=on_change,
             width=110
         )
@@ -60,6 +60,8 @@ class Disciplina:
             on_change=on_change,
             width=80
         )
+        async def btn_remover_click(e):
+            await on_delete(self)
 
         self.view = ft.Container(
             padding=10,
@@ -75,7 +77,7 @@ class Disciplina:
                     ft.TextButton(
                         "Remover disciplina",
                         style=ft.ButtonStyle(color="red"),
-                        on_click=lambda e: on_delete(self)
+                        on_click=btn_remover_click # Usamos a função async aqui (sem lambda)
                     )
                 ],
                 spacing=10
@@ -90,6 +92,7 @@ def main(page: ft.Page):
 
     disciplinas = []
     state = State()
+    file_path = ""
     
 
 
@@ -114,12 +117,13 @@ def main(page: ft.Page):
         if not state.picked_files: return
         
         btn_upload.disabled = True
-        arquivo = state.picked_files[0] # Pega o arquivo que guardamos antes
+        arquivo = state.picked_files[0]
         
-        page.show_dialog(ft.SnackBar(ft.Text("Enviando..."), bgcolor="blue"))
+        # Feedback visual para o usuário
+        page.show_dialog(ft.SnackBar(ft.Text("Enviando arquivo... Aguarde processamento."), bgcolor="blue"))
         page.update()
 
-        # Faz o upload para a pasta 'uploads' do servidor
+        # 1. Faz o Upload
         upload_url = page.get_upload_url(f"{arquivo.name}", 600)
         await state.file_picker.upload(
             files=[
@@ -129,17 +133,55 @@ def main(page: ft.Page):
                 )
             ]
         )
+
+        # Caminho onde o arquivo VAI aparecer
         caminho_final = os.path.join("uploads", arquivo.name)
-        leitura_pdf(caminho_final)
-        if os.path.exists(caminho_final):
-            os.remove(caminho_final)
-            print(f"Arquivo {arquivo.name} deletado do servidor por segurança.")
         
-        page.show_dialog(ft.SnackBar(ft.Text(f"Sucesso: {arquivo.name}"), bgcolor="green"))
+        # 2. LOOP DE ESPERA INTELIGENTE (O Segredo)
+        # O Render pode levar alguns segundos para 'materializar' o arquivo.
+        # Vamos esperar até ele existir e ter tamanho > 0 bytes.
+        
+        tentativas = 0
+        max_tentativas = 15 # Espera no máximo 15 segundos
+        arquivo_pronto = False
+
+        while tentativas < max_tentativas:
+            if os.path.exists(caminho_final) and os.path.getsize(caminho_final) > 0:
+                arquivo_pronto = True
+                break # Sai do loop, o arquivo chegou!
+            
+            # Se não chegou, espera 1 segundo e tenta de novo
+            await asyncio.sleep(1)
+            tentativas += 1
+            print(f"Aguardando arquivo... tentativa {tentativas}")
+
+        # 3. Processamento
+        if arquivo_pronto:
+            try:
+                # Chama a leitura
+                leitura_pdf(caminho_final)
+                
+                # Feedback de Sucesso
+                page.show_dialog(ft.SnackBar(ft.Text(f"Processado com sucesso!"), bgcolor="green"))
+                
+                # Opcional: Apagar do servidor para economizar espaço/segurança
+                if os.path.exists(caminho_final):
+                    os.remove(caminho_final)
+                    
+            except Exception as erro:
+                page.show_dialog(ft.SnackBar(ft.Text(f"Erro ao ler PDF: {erro}"), bgcolor="red"))
+        else:
+            page.show_dialog(ft.SnackBar(ft.Text("Erro: O upload demorou muito. Tente novamente."), bgcolor="red"))
+
+        # Reabilita o botão e atualiza
+        btn_upload.disabled = False
         page.update()
 
-    def salvar_tudo():
-        # Cria o dicionário de dados
+    # Importante: Certifique-se de ter 'import json' no topo do arquivo
+
+    # 1. Transformamos em ASYNC porque shared_preferences exige await
+    async def salvar_tudo():
+        # Cria o dicionário de dados (Igual a antes)
         dados = {
             "total_creditos": txt_total_creditos.value,
             "cr_atual": txt_cr_atual.value,
@@ -147,7 +189,6 @@ def main(page: ft.Page):
             "lista_disciplinas": []
         }
 
-        # Preenche a lista de disciplinas
         for d in disciplinas:
             dados["lista_disciplinas"].append({
                 "nome": d.nome.value, 
@@ -155,21 +196,28 @@ def main(page: ft.Page):
                 "nota": d.nota.value
             })
         
-        # Grava no armazenamento do navegador do usuário (Client Storage)
         try:
-            page.client_storage.set("dados_cr", dados)
-        except Exception as ex:
-            print(f"Erro ao salvar no navegador: {ex}")
+            # CONVERTE O DICIONÁRIO PARA TEXTO (JSON)
+            dados_texto = json.dumps(dados)
+            
+            # SALVA USANDO O NOVO MÉTODO
+            await page.shared_preferences.set("dados_cr_v2", dados_texto)
+        except Exception as e:
+            print(f"Erro ao salvar: {e}")
 
-    def carregar_tudo():
-        # Verifica se existem dados salvos no navegador deste usuário
-        if not page.client_storage.contains_key("dados_cr"):
-            adicionar_disciplina() # Começa do zero se não tiver histórico
-            return
-
+    # 2. Carregamento também vira ASYNC
+    async def carregar_tudo():
         try:
-            # Recupera os dados diretamente do navegador
-            dados = page.client_storage.get("dados_cr")
+            # Tenta pegar o texto salvo
+            # Se não existir, ele retorna None
+            dados_texto = await page.shared_preferences.get("dados_cr_v2")
+            
+            if not dados_texto:
+                await adicionar_disciplina()
+                return
+
+            # CONVERTE O TEXTO DE VOLTA PARA DICIONÁRIO
+            dados = json.loads(dados_texto)
 
             # Restaura globais
             txt_total_creditos.value = dados.get("total_creditos", "")
@@ -179,57 +227,47 @@ def main(page: ft.Page):
             # Restaura disciplinas
             lista_salva = dados.get("lista_disciplinas", [])
             for item in lista_salva:
-                adicionar_disciplina(dados=item)
+                await adicionar_disciplina(dados=item) # Note o await aqui também
             
-            # Se a lista estava vazia no armazenamento, adiciona uma em branco
             if not lista_salva:
-                adicionar_disciplina()
+                await adicionar_disciplina()
 
             calcular_cr()
             
         except Exception as ex:
-            print(f"Erro ao ler dados do navegador: {ex}")
-            adicionar_disciplina()
+            print(f"Erro ao ler shared_preferences: {ex}")
+            await adicionar_disciplina()
 
-    # Evento unificado
-    def on_change_geral(e=None):
+    # 3. O evento de mudança precisa ser ASYNC para chamar o salvar_tudo
+    async def on_change_geral(e=None):
         calcular_cr()
-        salvar_tudo()
+        await salvar_tudo()
 
-    txt_total_creditos = ft.TextField(
-        label="Créditos Totais Acumulados",
-        keyboard_type="number",
-        on_change=on_change_geral
-    )
+    # 4. Adicionar disciplina precisa ser ASYNC para salvar logo em seguida
+    async def adicionar_disciplina(e=None, dados=None):
+        n = dados["nome"] if dados else ""
+        p = dados["peso"] if dados else ""
+        nt = dados["nota"] if dados else ""
 
-    txt_cr_atual = ft.TextField(
-        label="CR Acumulado Atual",
-        keyboard_type="number",
-        on_change=on_change_geral
-    )
-    
-    txt_periodo = ft.TextField(
-        label="Período de ingresso na Universisdade (Ex: 2020/1)",
-        keyboard_type="number",
-        on_change=on_change_geral
-    )
-    
-    resultado = ft.Text(
-        "Aguardando cálculo...",
-        size=18,
-        weight="bold"
-    )
-    
-    alerta = ft.AlertDialog(
-        title=ft.Text("Atenção!"),
-        content=ft.Text("Preencha o campo com o período de imgresso."),
-        actions=[
-            ft.TextButton("Entendi", on_click=lambda e: page.pop_dialog())],
-        on_dismiss=page.pop_dialog(),
+        # Passamos on_change_geral (que agora é async)
+        d = Disciplina(
+            on_delete=remover_disciplina,
+            on_change=on_change_geral, 
+            n_ini=n, p_ini=p, nt_ini=nt
+        )
+        disciplinas.append(d)
+        lista.controls.append(d.view)
+        
+        if e is not None: # Se foi clique manual do botão
+            await salvar_tudo()
+            page.update()
 
-    )
-
-    lista = ft.Column(spacing=10)
+    # 5. Remover também vira async
+    async def remover_disciplina(d):
+        disciplinas.remove(d)
+        lista.controls.remove(d.view)
+        await on_change_geral()
+        page.update()
     
     
     def leitura_pdf(PATH_BOLETIM):
@@ -325,7 +363,7 @@ def main(page: ft.Page):
                                 disciplinas_encontradas += 1
                                 notas_pdf.append(float(nota))
                                 creditos_pdf.append(float(credito))
-                print(creditos_pdf, notas_pdf)
+                #print(creditos_pdf, notas_pdf)
                 
                 txt_total_creditos.value = np.sum(np.array(creditos_pdf))
                 txt_cr_atual_calculo = np.sum(np.array(notas_pdf) * np.array(creditos_pdf))/np.sum(np.array(creditos_pdf))
@@ -361,28 +399,7 @@ def main(page: ft.Page):
 
         page.update()
 
-    def adicionar_disciplina(e=None, dados=None):
-        n = dados["nome"] if dados else ""
-        p = dados["peso"] if dados else ""
-        nt = dados["nota"] if dados else ""
 
-        d = Disciplina(
-            on_delete=remover_disciplina,
-            on_change=on_change_geral,
-            n_ini=n, p_ini=p, nt_ini=nt
-        )
-        disciplinas.append(d)
-        lista.controls.append(d.view)
-        
-        if e is not None: # Se foi clique manual
-            salvar_tudo()
-            page.update()
-
-    def remover_disciplina(d):
-        disciplinas.remove(d)
-        lista.controls.remove(d.view)
-        on_change_geral()
-        page.update()
     # --- APOIO / PIX ---
     
     chave_pix_copia_cola = "00020101021126580014br.gov.bcb.pix01364a063b34-f773-4f81-a183-b0c08e9ae4105204000053039865802BR5920GABRIEL A A DA SILVA6013RIO DE JANEIR62070503***6304A3B1"
@@ -443,6 +460,32 @@ def main(page: ft.Page):
             on_click=handle_file_upload,
             disabled=True,)
 
+    txt_total_creditos = ft.TextField(
+        label="Créditos Totais Acumulados",
+        keyboard_type="number",
+        on_change=on_change_geral
+    )
+
+    txt_cr_atual = ft.TextField(
+        label="CR Acumulado Atual",
+        keyboard_type="number",
+        on_change=on_change_geral
+    )
+    
+    txt_periodo = ft.TextField(
+        label="Período de ingresso (Ex: 2020/1)",
+        keyboard_type="number",
+        on_change=on_change_geral
+    )
+    
+    resultado = ft.Text(
+        "Aguardando cálculo...",
+        size=18,
+        weight="bold"
+    )
+    
+    lista = ft.Column(spacing=10)
+
     page.add(
         ft.Row(controls=[ft.Text("Simulador de CR", size=24, weight="bold"), btn_apoio]),
         txt_total_creditos,
@@ -451,7 +494,7 @@ def main(page: ft.Page):
         ft.Row(
             controls=[
                 ft.Button(
-                    content="Pick files",
+                    content="Selecionar Boletim",
                     icon=ft.Icons.UPLOAD_FILE,
                     on_click=handle_pick_files,
                 ),
@@ -474,8 +517,7 @@ def main(page: ft.Page):
     )
     
     # Inicia carregando do JSON
-    carregar_tudo()
-    page.update()
+    page.run_task(carregar_tudo)
 
 if __name__ == "__main__":
     if not os.path.exists("uploads"):
