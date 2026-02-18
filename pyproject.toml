@@ -1,5 +1,5 @@
 [project]
-name = "Simulador CR"
+name = "simulador_cr"
 version = "1.0.0"
 description = "Simulador de CR"
 readme = "README.md"
