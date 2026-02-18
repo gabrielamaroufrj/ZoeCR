@@ -536,3 +536,4 @@ if __name__ == "__main__":
         main,
         upload_dir="uploads",
         port=int(os.getenv("PORT", 8000))
+    )
