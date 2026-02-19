@@ -15,7 +15,7 @@ O **Simulador de CR** permite que o aluno importe seu Boletim Escolar (PDF), ext
 - **📄 Leitura Automática de PDF:** Importa boletins e extrai disciplinas, notas e créditos usando `pdfplumber` e Regex.
 - **🧮 Cálculo de Previsão:** Simule notas futuras e veja instantaneamente o impacto no seu CR Geral.
 - **💾 Salvamento Automático:** Seus dados (disciplinas inseridas, CR atual) são salvos localmente em um arquivo JSON. Você não perde nada ao fechar o app.
-- **📱 Multiplataforma:** Roda em Desktop (Windows/Linux/Mac) e Mobile (Android).
+- **📱 Multiplataforma:** Roda em Desktop (Windows/Linux) e Mobile (Android).
 - **🚫 Filtros Inteligentes:** Ignora automaticamente trancamentos, isenções e pendências na importação do PDF.
 
 ## 🚀 Instalação e Execução Local
