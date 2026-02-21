@@ -2,13 +2,14 @@
 
 > Um aplicativo multiplataforma (Android, Linux, Windows) desenvolvido em Python e Flet para auxiliar estudantes universitários no cálculo e projeção de seu desempenho acadêmico.
 
-![Badge License](https://img.shields.io/github/license/GabrielAmaro/SimuladorCR)
+![Status](https://img.shields.io/badge/Status-Em_Desenvolvimento-yellow)
+![License](https://img.shields.io/badge/License-MIT-green)
 ![Badge Python](https://img.shields.io/badge/Python-3.12-blue)
 ![Badge Flet](https://img.shields.io/badge/Flet-0.21+-purple)
 
 ## 🎯 Sobre o Projeto
 
-O **Simulador de CR** permite que o aluno importe seu Boletim Escolar (PDF), extraia automaticamente as notas e créditos, e simule como suas notas futuras impactarão o CR acumulado. O projeto foi otimizado para ler boletins no formato padrão da **UFRJ**, mas permite inserção manual para qualquer universidade.
+O **ZoeCR** permite que o aluno importe seu Boletim Escolar (PDF), extraia automaticamente as notas e créditos, e simule como suas notas futuras impactarão o CR acumulado. O projeto foi otimizado para ler boletins no formato padrão da **UFRJ**, mas permite inserção manual para qualquer universidade.
 
 ## ✨ Funcionalidades
 
