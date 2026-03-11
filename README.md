@@ -29,3 +29,11 @@ Para rodar o código no seu computador, você precisa ter o Python instalado.
    ```bash
    git clone https://github.com/gabrielamaroufrj/ZoeCR.git
    cd ZoeCR
+
+2. **Instale as Dependências:**
+   ```bash
+   pip install -r requirements.txt
+
+3. **Run:**
+   ```bash
+   python main.py
